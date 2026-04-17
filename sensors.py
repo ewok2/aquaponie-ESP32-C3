@@ -1,6 +1,6 @@
 import machine, onewire, ds18x20, dht, time
 import struct
-from utils import logPrint, interpolate2D, interpolate3D
+from utils import logPrint, interpolate2D, interpolate3D, paris_time
 
 
 def dht22Get(socketMessage, serialConnect, pin_dht):
@@ -77,8 +77,9 @@ def capacityGet(socketMessage, serialConnect):
 
 
 def computeTimeAndPump(socketMessage, serialConnect, timeTable, monthTable, sleepTable, pumpTable):
-    timeOfDay = time.gmtime()[3] + time.gmtime()[4] / 60
-    month     = time.gmtime()[1]
+    t         = paris_time()
+    timeOfDay = t[3] + t[4] / 60
+    month     = t[1]
     socketMessage["timeOfDay"] = timeOfDay
     socketMessage["month"]     = month
 

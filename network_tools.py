@@ -26,7 +26,7 @@ def connect_wifi(socketMessage, serialConnect):
     else:
         logPrint("Non connecte", serialConnect)
         return None
-    ntptime.host = "192.168.75.1"
+    ntptime.host = secrets['ntp_host']
     ntptime.settime()
     logPrint("NTP synchronise", serialConnect)
     return wlan
@@ -43,8 +43,8 @@ def disconnect_wifi(socketMessage, serialConnect, wlan):
 
 
 def pushToSocket(socketMessage, serialConnect):
-    hostname = '192.168.75.20'
-    portnum  = 11222
+    hostname = secrets['socket_host']
+    portnum  = secrets['socket_port']
     homeSocket = socket.socket()
     homeSocket.settimeout(10)
     homeSocket.connect((hostname, portnum))

@@ -1,5 +1,6 @@
 import machine
 import time
+from secrets import secrets
 from utils import flash_led, logPrint, safe_call, errorNumSet
 from network_tools import connect_wifi, disconnect_wifi, pushToSocket
 from sensors import (dht22Get, tempWaterGet, pumpLogic, lire_tensions,
@@ -36,8 +37,8 @@ sleepTable = [[30, 22, 30, 22, 30],
 
 pumpTable = [1,  3,  4,  3,  1]
 
-pumpDuration  = 120
-deepSleepTime = 15
+pumpDuration  = secrets.get('pumpDuration', 120)
+deepSleepTime = secrets.get('deepSleepTime', 15)
 timeOfDay     = 0
 pumpTime      = []
 rtc = machine.RTC()
@@ -77,4 +78,3 @@ logPrint("Going to sleep for : %s min" % deepSleepTime, serialConnect)
 flash_led(3, led_out_red)
 
 machine.deepsleep(int(deepSleepTime * 60 * 1_000))
-

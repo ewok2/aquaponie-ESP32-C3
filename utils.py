@@ -1,6 +1,41 @@
 import time
 
 
+def paris_time():
+    t = time.gmtime()
+    y, mo, d, h, mi, s = t[0], t[1], t[2], t[3], t[4], t[5]
+
+    def _weekday(y, m, d):
+        tab = [0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4]
+        if m < 3:
+            y -= 1
+        return (y + y//4 - y//100 + y//400 + tab[m-1] + d) % 7  # 0=Sunday
+
+    def _last_sunday(y, m):
+        dims = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+        if m == 2 and (y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)):
+            dims[2] = 29
+        last = dims[m]
+        return last - _weekday(y, m, last)
+
+    dst_start = _last_sunday(y, 3)
+    dst_end   = _last_sunday(y, 10)
+
+    if mo > 3 and mo < 10:
+        in_dst = True
+    elif mo == 3:
+        in_dst = d > dst_start or (d == dst_start and h >= 2)
+    elif mo == 10:
+        in_dst = not (d > dst_end or (d == dst_end and h >= 1))
+    else:
+        in_dst = False
+
+    h += 2 if in_dst else 1
+    if h >= 24:
+        h -= 24
+    return (y, mo, d, h, mi, s, t[6], t[7])
+
+
 def flash_led(nb, led):
     for i in range(nb):
         led.toggle()
