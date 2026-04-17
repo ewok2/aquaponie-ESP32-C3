@@ -33,6 +33,22 @@ def safe_call(func, error_code, socketMessage, serialConnect, *args, **kwargs):
         return None
 
 
+def errorNumSet(number, errorVal, serialConnect):
+    prev = errorVal
+    errorVal = errorVal | (1 << number)
+    if prev != errorVal:
+        logPrint('errorVal: %s -> %s' % (prev, errorVal), serialConnect)
+    return errorVal
+
+
+def errorNumReset(number, errorVal, serialConnect):
+    prev = errorVal
+    errorVal = errorVal & ~(1 << number)
+    if prev != errorVal:
+        logPrint('errorVal: %s -> %s' % (prev, errorVal), serialConnect)
+    return errorVal
+
+
 def connect_wifi(serialConnect):
     SSID = secrets['ssid']
     PASSWORD = secrets['pw']
@@ -72,42 +88,25 @@ def disconnect_wifi(wlan, serialConnect):
 
 
 def dht22Get(socketMessage, serialConnect):
-    errorDht22 = 1
     dht22 = dht.DHT22(machine.Pin(PIN_DHT))
-    try:
-        dht22.measure()
-        socketMessage["dht22AquaTemp"] = dht22.temperature()
-        socketMessage["dht22AquaHum"] = dht22.humidity()
-        socketMessage["dht22AquaValid"] = 1
-        logPrint("Temperature air : %4.1f C ; Humidity : %4.1f %%" % (
-            socketMessage["dht22AquaTemp"], socketMessage["dht22AquaHum"]), serialConnect)
-        socketMessage["aquaErrorNum"] = errorNumReset(errorDht22, socketMessage["aquaErrorNum"], serialConnect)
-    except Exception as e:
-        logPrint('Failed to read sensor dht22: %s' % e, serialConnect)
-        socketMessage["aquaErrorNum"] = errorNumSet(errorDht22, socketMessage["aquaErrorNum"], serialConnect)
-        socketMessage["dht22AquaValid"] = 0
+    dht22.measure()
+    socketMessage["dht22AquaTemp"]  = dht22.temperature()
+    socketMessage["dht22AquaHum"]   = dht22.humidity()
+    socketMessage["dht22AquaValid"] = 1
+    logPrint("Temperature air : %4.1f C ; Humidity : %4.1f %%" % (
+        socketMessage["dht22AquaTemp"], socketMessage["dht22AquaHum"]), serialConnect)
 
 
 def tempWaterGet(socketMessage, serialConnect):
-    errorWater = 2
     waterPin = machine.Pin(PIN_THERMO)
-    try:
-        waterSensor = ds18x20.DS18X20(onewire.OneWire(waterPin))
-        if waterSensor.scan() != []:
-            waterSensor.convert_temp()
-            time.sleep_ms(750)
-            socketMessage["waterAquaTemp"] = waterSensor.read_temp(b'(\xff,R\xc0\x17\x01\xc1')
-            socketMessage["waterAquaValid"] = 1
-            logPrint("Temperature eau : %4.1f C" % socketMessage["waterAquaTemp"], serialConnect)
-            socketMessage["aquaErrorNum"] = errorNumReset(errorWater, socketMessage["aquaErrorNum"], serialConnect)
-        else:
-            logPrint('Failed to read sensor water Temp: no device found', serialConnect)
-            socketMessage["aquaErrorNum"] = errorNumSet(errorWater, socketMessage["aquaErrorNum"], serialConnect)
-            socketMessage["waterAquaValid"] = 0
-    except Exception as e:
-        logPrint('Failed to read sensor water Temp: %s' % e, serialConnect)
-        socketMessage["aquaErrorNum"] = errorNumSet(errorWater, socketMessage["aquaErrorNum"], serialConnect)
-        socketMessage["waterAquaValid"] = 0
+    waterSensor = ds18x20.DS18X20(onewire.OneWire(waterPin))
+    if waterSensor.scan() == []:
+        raise OSError("no DS18X20 device found")
+    waterSensor.convert_temp()
+    time.sleep_ms(750)
+    socketMessage["waterAquaTemp"]  = waterSensor.read_temp(b'(\xff,R\xc0\x17\x01\xc1')
+    socketMessage["waterAquaValid"] = 1
+    logPrint("Temperature eau : %4.1f C" % socketMessage["waterAquaTemp"], serialConnect)
 
 
 def interpolate3D(x_points, y_points, z_table, x_val, y_val, serialConnect):
@@ -129,11 +128,10 @@ def interpolate3D(x_points, y_points, z_table, x_val, y_val, serialConnect):
     z10 = z_table[index_x + 1][index_y]
     z01 = z_table[index_x][index_y + 1]
     z11 = z_table[index_x + 1][index_y + 1]
-    z_val = (z00 * (x1 - x_val) * (y1 - y_val) +
-             z10 * (x_val - x0) * (y1 - y_val) +
-             z01 * (x1 - x_val) * (y_val - y0) +
-             z11 * (x_val - x0) * (y_val - y0)) / ((x1 - x0) * (y1 - y0))
-    return z_val
+    return (z00 * (x1 - x_val) * (y1 - y_val) +
+            z10 * (x_val - x0) * (y1 - y_val) +
+            z01 * (x1 - x_val) * (y_val - y0) +
+            z11 * (x_val - x0) * (y_val - y0)) / ((x1 - x0) * (y1 - y0))
 
 
 def interpolate2D(x, colonne_x, colonne_y):
@@ -160,73 +158,80 @@ def interpolate2D(x, colonne_x, colonne_y):
     return colonne_y[-1]
 
 
+def computeTimeAndPump(socketMessage, serialConnect, timeTable, monthTable, sleepTable, pumpTable):
+    timeOfDay = time.gmtime()[3] + time.gmtime()[4] / 60
+    month     = time.gmtime()[1]
+    socketMessage["timeOfDay"] = timeOfDay
+    socketMessage["month"]     = month
+
+    deepSleepTime = int(interpolate3D(timeTable, monthTable, sleepTable, timeOfDay, month, serialConnect))
+    pumpTimeNb    = int(round(interpolate2D(month, monthTable, pumpTable)))
+
+    if socketMessage["dht22AquaTemp"] <= 2.0:
+        pumpTimeNb = 0
+
+    logPrint("deepSleepTime : %s" % deepSleepTime, serialConnect)
+    logPrint("pumpTimeNb : %s" % pumpTimeNb, serialConnect)
+
+    if pumpTimeNb == 4:
+        pumpTime = [10, 12, 14, 16]
+    elif pumpTimeNb == 3:
+        pumpTime = [10, 12, 14]
+    elif pumpTimeNb == 2:
+        pumpTime = [12, 14]
+    elif pumpTimeNb == 1:
+        pumpTime = [12]
+    else:
+        pumpTime = []
+
+    socketMessage["aquaSleepTime"] = deepSleepTime
+    socketMessage["aquaPumpNb"]    = pumpTimeNb
+    return deepSleepTime, timeOfDay, pumpTime
+
+
 def pumpLogic(socketMessage, pumpTime, pumpDuration, timeOfDay, rtc, serialConnect):
-    errorPump = 4
     pump = machine.Pin(PIN_PUMP, machine.Pin.OUT)
     pump.value(0)
-    try:
-        heures  = int(timeOfDay)
-        minutes = round((timeOfDay - heures) * 60)
-        logPrint('current time is : %i:%02i' % (heures, minutes), serialConnect)
-        flag = load_flag(rtc)
-        if heures in pumpTime:
-            if not flag:
-                socketMessage["aquaPumpTime"] = timeOfDay
-                socketMessage["aquaPumpVal"] = pumpDuration
-                pumpActivation = True
-                save_flag(rtc, True)
-            else:
-                pumpActivation = False
-                socketMessage["aquaPumpVal"] = 0
+
+    heures  = int(timeOfDay)
+    minutes = round((timeOfDay - heures) * 60)
+    logPrint('current time is : %i:%02i' % (heures, minutes), serialConnect)
+
+    flag = load_flag(rtc)
+
+    if heures in pumpTime:
+        if not flag:
+            socketMessage["aquaPumpTime"] = timeOfDay
+            socketMessage["aquaPumpVal"]  = pumpDuration
+            pumpActivation = True
+            save_flag(rtc, True)
         else:
-            socketMessage["aquaPumpVal"] = 0
             pumpActivation = False
-            save_flag(rtc, False)
-        if pumpActivation:
-            pump.value(1)
-            logPrint('pump Running', serialConnect)
-            try:
-                time.sleep(pumpDuration)
-            finally:
-                pump.value(0)
-                logPrint('pump Stop', serialConnect)
-    except Exception as e:
-        pump.value(0)
-        logPrint('Failed to activate pump : %s' % e, serialConnect)
-        socketMessage["aquaErrorNum"] = errorNumSet(errorPump, socketMessage["aquaErrorNum"], serialConnect)
+            socketMessage["aquaPumpVal"] = 0
+    else:
+        socketMessage["aquaPumpVal"] = 0
+        pumpActivation = False
+        save_flag(rtc, False)
+
+    if pumpActivation:
+        pump.value(1)
+        logPrint('pump Running', serialConnect)
+        try:
+            time.sleep(pumpDuration)
+        finally:
+            pump.value(0)
+            logPrint('pump Stop', serialConnect)
 
 
 def pushToSocket(socketMessage, serialConnect):
-    errorSocket = 5
     hostname = '192.168.75.20'
-    portnum = 11222
-    try:
-        homeSocket = socket.socket()
-        homeSocket.settimeout(10)
-        homeSocket.connect((hostname, portnum))
-        homeSocket.send(str(socketMessage).encode())
-        logPrint("Message send to raspberry socket : %s" % str(socketMessage), serialConnect)
-        homeSocket.close()
-        socketMessage["aquaErrorNum"] = errorNumReset(errorSocket, socketMessage["aquaErrorNum"], serialConnect)
-    except Exception as e:
-        logPrint('Failed to connect to raspberry socket : %s' % e, serialConnect)
-        socketMessage["aquaErrorNum"] = errorNumSet(errorSocket, socketMessage["aquaErrorNum"], serialConnect)
-
-
-def errorNumSet(number, errorVal, serialConnect):
-    prev_errorVal = errorVal
-    errorVal = errorVal | (1 << number)
-    if prev_errorVal != errorVal:
-        logPrint('errorVal change from : %s to : %s' % (prev_errorVal, errorVal), serialConnect)
-    return errorVal
-
-
-def errorNumReset(number, errorVal, serialConnect):
-    prev_errorVal = errorVal
-    errorVal = errorVal & ~(1 << number)
-    if prev_errorVal != errorVal:
-        logPrint('errorVal change from : %s to : %s' % (prev_errorVal, errorVal), serialConnect)
-    return errorVal
+    portnum  = 11222
+    homeSocket = socket.socket()
+    homeSocket.settimeout(10)
+    homeSocket.connect((hostname, portnum))
+    homeSocket.send(str(socketMessage).encode())
+    logPrint("Message sent : %s" % str(socketMessage), serialConnect)
+    homeSocket.close()
 
 
 def capacityGet(socketMessage, serialConnect):
@@ -236,9 +241,9 @@ def capacityGet(socketMessage, serialConnect):
     x1 = float(socketMessage["aquaVoltBatt1"])
     colonne_x = [4.15, 4.03, 3.93, 3.83, 3.74, 3.66, 3.62, 3.58, 3.55, 3.48, 3.4, 2.8]
     colonne_y = [ 100,   90,   81,   71,   62,   52,   42,   33,   23,   13,   4,   0]
-    y1_interpole = interpolate2D(x1, colonne_x, colonne_y)
-    socketMessage["aquaCapaBatt1"] = y1_interpole
-    logPrint('Battery1 capacity : %i%%' % y1_interpole, serialConnect)
+    y1 = interpolate2D(x1, colonne_x, colonne_y)
+    socketMessage["aquaCapaBatt1"] = y1
+    logPrint('Battery1 capacity : %i%%' % y1, serialConnect)
 
 
 def read_adc(ch):
@@ -263,29 +268,21 @@ def read_adc(ch):
 
 
 def lire_tensions(socketMessage, serialConnect):
-    errorMCP3426 = 3
-    try:
-        v0 = read_adc(0) * 2.0
-        v1 = read_adc(1) * 9.33333
-        if 0 <= v0 <= 5:
-            socketMessage["aquaVoltBatt1"] = v0
-            socketMessage["aquaBatt1Valid"] = 1
-        else:
-            socketMessage["aquaVoltBatt1"] = 0
-            socketMessage["aquaBatt1Valid"] = 0
-        if 0 <= v1 <= 25:
-            socketMessage["aquaVoltSolar1"] = v1
-            socketMessage["aquaSolar1Valid"] = 1
-        else:
-            socketMessage["aquaVoltSolar1"] = 0
-            socketMessage["aquaSolar1Valid"] = 0
-        logPrint("Batt1 : %4.1f V ; Solar1 : %4.1f V" % (v0, v1), serialConnect)
-        socketMessage["aquaErrorNum"] = errorNumReset(errorMCP3426, socketMessage["aquaErrorNum"], serialConnect)
-    except Exception as e:
+    v0 = read_adc(0) * 2.0
+    v1 = read_adc(1) * 9.33333
+    if 0 <= v0 <= 5:
+        socketMessage["aquaVoltBatt1"]  = v0
+        socketMessage["aquaBatt1Valid"] = 1
+    else:
+        socketMessage["aquaVoltBatt1"]  = 0
         socketMessage["aquaBatt1Valid"] = 0
+    if 0 <= v1 <= 25:
+        socketMessage["aquaVoltSolar1"]  = v1
+        socketMessage["aquaSolar1Valid"] = 1
+    else:
+        socketMessage["aquaVoltSolar1"]  = 0
         socketMessage["aquaSolar1Valid"] = 0
-        logPrint('Failed to read MCP3426 : %s' % e, serialConnect)
-        socketMessage["aquaErrorNum"] = errorNumSet(errorMCP3426, socketMessage["aquaErrorNum"], serialConnect)
+    logPrint("Batt1 : %4.1f V ; Solar1 : %4.1f V" % (v0, v1), serialConnect)
 
 
 def update_boot_counter(rtc):
@@ -294,7 +291,7 @@ def update_boot_counter(rtc):
         counter, flag = struct.unpack("IB", data)
     else:
         counter = 0
-        flag = 0
+        flag    = 0
     counter += 1
     rtc.memory(struct.pack("IB", counter, flag))
     return counter
