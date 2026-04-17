@@ -3,12 +3,6 @@ import machine, onewire, ds18x20, dht, time
 from secrets import secrets
 import struct
 
-PIN_DHT = 6
-PIN_THERMO = 7
-PIN_PUMP = 5
-PIN_SCL = 21
-PIN_SDA = 20
-
 
 def flash_led(nb, led):
     for i in range(nb):
@@ -87,8 +81,8 @@ def disconnect_wifi(socketMessage, serialConnect, wlan):
     time.sleep_ms(100)
 
 
-def dht22Get(socketMessage, serialConnect):
-    dht22 = dht.DHT22(machine.Pin(PIN_DHT))
+def dht22Get(socketMessage, serialConnect, pin_dht):
+    dht22 = dht.DHT22(machine.Pin(pin_dht))
     dht22.measure()
     socketMessage["dht22AquaTemp"]  = dht22.temperature()
     socketMessage["dht22AquaHum"]   = dht22.humidity()
@@ -97,8 +91,8 @@ def dht22Get(socketMessage, serialConnect):
         socketMessage["dht22AquaTemp"], socketMessage["dht22AquaHum"]), serialConnect)
 
 
-def tempWaterGet(socketMessage, serialConnect):
-    waterPin = machine.Pin(PIN_THERMO)
+def tempWaterGet(socketMessage, serialConnect, pin_thermo):
+    waterPin = machine.Pin(pin_thermo)
     waterSensor = ds18x20.DS18X20(onewire.OneWire(waterPin))
     if waterSensor.scan() == []:
         raise OSError("no DS18X20 device found")
@@ -189,8 +183,8 @@ def computeTimeAndPump(socketMessage, serialConnect, timeTable, monthTable, slee
     return deepSleepTime, timeOfDay, pumpTime
 
 
-def pumpLogic(socketMessage, serialConnect, pumpTime, pumpDuration, timeOfDay, rtc):
-    pump = machine.Pin(PIN_PUMP, machine.Pin.OUT)
+def pumpLogic(socketMessage, serialConnect, pin_pump, pumpTime, pumpDuration, timeOfDay, rtc):
+    pump = machine.Pin(pin_pump, machine.Pin.OUT)
     pump.value(0)
 
     heures  = int(timeOfDay)
@@ -246,8 +240,8 @@ def capacityGet(socketMessage, serialConnect):
     logPrint('Battery1 capacity : %i%%' % y1, serialConnect)
 
 
-def read_adc(ch):
-    i2c = machine.I2C(0, scl=machine.Pin(PIN_SCL), sda=machine.Pin(PIN_SDA))
+def read_adc(ch, pin_scl, pin_sda):
+    i2c = machine.I2C(0, scl=machine.Pin(pin_scl), sda=machine.Pin(pin_sda))
     MCP3426_ADDR = 0x68
     if ch == 0:
         ch_bits = 0b00 << 5
@@ -267,9 +261,9 @@ def read_adc(ch):
     return val * 2.048 / 2048
 
 
-def lire_tensions(socketMessage, serialConnect):
-    v0 = read_adc(0) * 2.0
-    v1 = read_adc(1) * 9.33333
+def lire_tensions(socketMessage, serialConnect, pin_scl, pin_sda):
+    v0 = read_adc(0, pin_scl, pin_sda) * 2.0
+    v1 = read_adc(1, pin_scl, pin_sda) * 9.33333
     if 0 <= v0 <= 5:
         socketMessage["aquaVoltBatt1"]  = v0
         socketMessage["aquaBatt1Valid"] = 1

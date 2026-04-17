@@ -4,10 +4,14 @@ from sensor import (flash_led, connect_wifi, disconnect_wifi, logPrint,
                     dht22Get, tempWaterGet, pumpLogic, pushToSocket,
                     lire_tensions, update_boot_counter, capacityGet,
                     safe_call, errorNumSet, computeTimeAndPump)
-from secrets import secrets
-
 led_out_green = machine.Pin(0, machine.Pin.OUT)
 led_out_red   = machine.Pin(1, machine.Pin.OUT)
+
+PIN_DHT    = 6
+PIN_THERMO = 7
+PIN_PUMP   = 5
+PIN_SCL    = 21
+PIN_SDA    = 20
 
 socketMessage = {}
 socketMessage["aquaErrorNum"]    = 0
@@ -55,9 +59,9 @@ logPrint("Script start", serialConnect)
 flash_led(3, led_out_green)
 
 wlan = safe_call(connect_wifi,   ERR_WIFI,     socketMessage, serialConnect)
-safe_call(dht22Get,              ERR_DHT22,    socketMessage, serialConnect)
-safe_call(tempWaterGet,          ERR_WATER,    socketMessage, serialConnect)
-safe_call(lire_tensions,         ERR_TENSION,  socketMessage, serialConnect)
+safe_call(dht22Get,              ERR_DHT22,    socketMessage, serialConnect, PIN_DHT)
+safe_call(tempWaterGet,          ERR_WATER,    socketMessage, serialConnect, PIN_THERMO)
+safe_call(lire_tensions,         ERR_TENSION,  socketMessage, serialConnect, PIN_SCL, PIN_SDA)
 safe_call(capacityGet,           ERR_CAPACITY, socketMessage, serialConnect)
 
 result = safe_call(computeTimeAndPump, ERR_INTERP, socketMessage, serialConnect,
@@ -65,7 +69,7 @@ result = safe_call(computeTimeAndPump, ERR_INTERP, socketMessage, serialConnect,
 if result is not None:
     deepSleepTime, timeOfDay, pumpTime = result
 
-safe_call(pumpLogic,       ERR_PUMP, socketMessage, serialConnect, pumpTime, pumpDuration, timeOfDay, rtc)
+safe_call(pumpLogic,       ERR_PUMP, socketMessage, serialConnect, PIN_PUMP, pumpTime, pumpDuration, timeOfDay, rtc)
 safe_call(pushToSocket,    ERR_PUSH, socketMessage, serialConnect)
 safe_call(disconnect_wifi, ERR_DISC, socketMessage, serialConnect, wlan)
 
